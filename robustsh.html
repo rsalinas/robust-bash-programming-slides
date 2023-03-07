@@ -1,0 +1,596 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+ "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta http-equiv="Content-Style-Type" content="text/css" />
+  <meta name="generator" content="pandoc" />
+  <meta name="author" content="Raúl Salinas-Monteagudo" />
+  <meta name="date" content="2023-03-10" />
+  <title>Robust shell programming.</title>
+  <style type="text/css">
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    span.underline{text-decoration: underline;}
+    div.column{display: inline-block; vertical-align: top; width: 50%;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" type="text/css" media="screen, projection, print"
+    href="https://www.w3.org/Talks/Tools/Slidy2/styles/slidy.css" />
+  <script src="https://www.w3.org/Talks/Tools/Slidy2/scripts/slidy.js"
+    charset="utf-8" type="text/javascript"></script>
+</head>
+<body>
+<div class="slide titlepage">
+  <h1 class="title">Robust shell programming.</h1>
+  <p class="subtitle">Tips for improving shell scripts</p>
+  <p class="author">
+Raúl Salinas-Monteagudo
+  </p>
+  <p class="date">2023-03-10</p>
+</div>
+<div id="motivation" class="slide section level1">
+<h1>Motivation</h1>
+<ul>
+<li>bash is very old (1989), archeology</li>
+<li>Interpreted</li>
+<li>It doesn’t encourage good practices by itself</li>
+<li>Manage wisely your assumptions</li>
+</ul>
+<p>These ideas apply to other languages too.</p>
+</div>
+<div id="interface-of-a-unix-command" class="slide section level1">
+<h1>Interface of a Unix command</h1>
+<ul>
+<li><p>Inputs:</p>
+<ul>
+<li>Arguments</li>
+<li>Standard input</li>
+<li>Environment</li>
+</ul></li>
+<li><p>Outputs:</p>
+<ul>
+<li>Return value</li>
+<li>Standard output</li>
+<li>Standard error</li>
+</ul></li>
+</ul>
+</div>
+<div id="arguments" class="slide section level1">
+<h1>Arguments</h1>
+<p>Handle your arguments wisely:</p>
+<ul>
+<li><pre><code>   Return non-zero upon bad arguments</code></pre></li>
+<li><pre><code>   Don&#39;t ignore unknown arguments</code></pre></li>
+<li><pre><code>   Support `-h | --help`, stdout</code></pre></li>
+<li><pre><code>   Support `-v | --version`, stdout</code></pre></li>
+<li><pre><code>   Non-destructive default action when called without parameters </code></pre></li>
+<li><pre><code>   `--dry`</code></pre></li>
+</ul>
+</div>
+<div id="argument-parsing" class="slide section level1">
+<h1>Argument parsing</h1>
+<p>If possible define your options in structures (arrays).</p>
+<pre><code>section Files 
+option INPUT input,i &quot;Set input file&quot;
+option OUTPUT output,o &quot;Set output file&quot;</code></pre>
+<ul>
+<li>Automatic help generation</li>
+<li>Easy bash-completion support</li>
+<li>Easier internationalization</li>
+</ul>
+</div>
+<div id="stdin.-console-orientation" class="slide section level1">
+<h1>stdin. Console orientation</h1>
+<p>Don’t assume X11 or the console. Define functions such as
+{showMessage, showError,die}. Then you can quickly switch to a GUI.
+(zenity, xmessage…)</p>
+<pre><code>getString() {
+    local prompt=&quot;$1&quot;
+    local default=&quot;$2&quot;
+    if [ -n &quot;${DISPLAY:-}&quot; ] &amp;&amp; which zenity &gt;&amp; /dev/null
+    then
+        zenity --entry --text=&quot;$prompt&quot;
+    else if tty -s     ## Checks whether stdin is a tty
+        read -p &quot;$prompt: &quot;
+        echo &quot;$REPLY&quot;
+    else
+        echo &quot;$default&quot;
+    fi
+}
+
+serverHost=$(getString &quot;Serverhost&quot; &quot;localhost&quot;)</code></pre>
+</div>
+<div id="return-value.-error-handling" class="slide section level1">
+<h1>Return value. Error handling</h1>
+<p>Pessimism rules. Don’t assume everything will go well:</p>
+<ul>
+<li>return zero iff success</li>
+<li>set -e because:
+<ul>
+<li>you avoid the need to “<code>if ! cmd ; ...</code>” in every
+line</li>
+<li>any failing line most probably means the rest of your script is
+senseless.</li>
+<li>shows the actual error ASAP. The message will be more
+meaningful.</li>
+</ul></li>
+</ul>
+</div>
+<div id="return-value.-error-handling-2" class="slide section level1">
+<h1>Return value. Error handling (2)</h1>
+<ul>
+<li>set -u: undefined variables most probably mean misspelled names or
+missing arguments.</li>
+<li>set -o pipefail</li>
+</ul>
+</div>
+<div id="set--eu-pitfalls" class="slide section level1">
+<h1><code>set -eu</code> pitfalls</h1>
+<ul>
+<li>Problem detecting if a variable is defined (trying to expand it
+would fail).</li>
+</ul>
+<pre><code>if [ -z &quot;$VAR&quot; ]          ##breaks on -u
+then 
+    warn &quot;VAR is not defined&quot; 
+fi   </code></pre>
+<p>Solution: Use <code>${VAR:-}</code></p>
+<pre><code>if [ ${VAR:-} == &quot;&quot; ]
+then 
+    warn &quot;VAR is not defined&quot; 
+fi  </code></pre>
+<p>Ignoring errors (~ignoring exceptions)</p>
+<pre><code>program_that_may_fail || true </code></pre>
+<pre><code>program || die &quot;Cannot run program&quot;</code></pre>
+</div>
+<div id="eu-example" class="slide section level1">
+<h1>-eu Example</h1>
+<pre><code>#! /bin/bash 
+
+set -eu 
+
+inputfile=/dev/stdin
+verbose=false
+
+while getopts &quot;i:o:v&quot; opt; do
+  case $opt in
+    i) inputfile=$OPTARG  ;;
+    o) outputfile=$OPTARG ;;
+    v) verbose=true ;;
+    \?) echo &quot;Invalid option: -$OPTARG&quot; &gt;&amp;2 ;;
+  esac
+done
+$verbose &amp;&amp; set -x
+echo From $inputfile to $outputfile</code></pre>
+<pre><code>$ ./test.sh 
+./test.sh: line 15: outputfile: unbound variable</code></pre>
+</div>
+<div id="stderr.-logging" class="slide section level1">
+<h1>stderr. Logging</h1>
+<ul>
+<li>Keep your stdout clean; complain to stderr. This will save you some
+grief the day you want to use your script in a pipeline.</li>
+<li>Define “die”.</li>
+</ul>
+<pre><code>function log() { echo &quot;$*&quot; &gt;&amp;2 ; }
+function die() { echo &quot;$*&quot; &gt;&amp;2 ; exit 1; }</code></pre>
+</div>
+<div id="hyper-verbosity" class="slide section level1">
+<h1>Hyper-verbosity</h1>
+<p>If you find yourself running your applications with
+<code>&gt;&amp; /dev/null</code>, consider improving them so that they
+are not so verbose by default. Otherwise:</p>
+<ul>
+<li>You miss detailed error messages</li>
+<li>You waste time composing and writing the messages</li>
+<li>Some programs offer silent modes:
+<ul>
+<li><code>grep -q</code></li>
+<li><code>tty -s</code> (checks tty availability)</li>
+</ul></li>
+</ul>
+</div>
+<div id="current-directory" class="slide section level1">
+<h1>Current directory</h1>
+<ul>
+<li>Assumptions about current directory must be well justified.<br />
+</li>
+<li>Ideally scripts should be callable from anywhere.</li>
+<li>Worry when you see yourself writing <code>/home/...</code> even
+temporarily.
+<ul>
+<li>Use something related to the current directory instead.<br />
+</li>
+<li>Even references to $HOME are discouraged.</li>
+</ul></li>
+</ul>
+</div>
+<div id="be-atomic" class="slide section level1">
+<h1>Be atomic</h1>
+<ul>
+<li><p>Don’t generate files in-place, but to a temp file, and then
+rename.</p></li>
+<li><p>Trap EXIT so that a SIGINT will cleanup as much as
+possible.</p></li>
+<li><p>Untrap when finished</p></li>
+<li><p><code>lockfile</code> mutual exclusion</p></li>
+<li><p>task-spooler</p></li>
+</ul>
+<pre><code>#! /bin/bash 
+
+TARGET_DIR=$1 
+trap &quot;rm -rf $TARGET_DIR&quot; EXIT  ## FIXME: no space-transparent
+
+construct $TARGET_DIR
+
+trap EXIT    ## don&#39;t remove the target directory from this point</code></pre>
+<p>Challenge: Cleanly combining multiple cleanup procedures</p>
+</div>
+<div id="task-spooler" class="slide section level1">
+<h1>Task spooler</h1>
+<pre><code>$ tsp mv dirA dest
+$ tsp mv dirB dest 
+$ tsp 
+ID   State      Output               E-Level  Times(r/u/s)   Command [run=0/1]
+0    finished   /tmp/ts-out.exiT0X   0        0.00/0.00/0.00 mv dirA dest
+1    finished   /tmp/ts-out.Flz2vB   0        0.00/0.00/0.00 mv dirB dest</code></pre>
+</div>
+<div id="be-functional---use-make" class="slide section level1">
+<h1>Be functional - use make</h1>
+<p>…sometimes.</p>
+<p>If you are building files that are derived from other files, don’t
+make (just) an imperative script. A make-file might be more appropriate.
+Advantages:</p>
+<ul>
+<li><pre><code>   An explicit declaration of file dependencies instead of a topologically sorted imperative list.</code></pre></li>
+<li><pre><code>   Parallelism for free.</code></pre></li>
+<li><pre><code>   Automatic removal of target file if the process fails.</code></pre></li>
+</ul>
+</div>
+<div id="missing-tools" class="slide section level1">
+<h1>Missing tools</h1>
+<p>Don’t assume you have all the tools you need. Since scripts perform
+lazy parsing and invoking, may well happen that the needed tools are not
+available.</p>
+<ul>
+<li><pre><code>   If they are not common: `which` for them at the beginning and even suggest the package to install.</code></pre></li>
+<li><pre><code>   If you need a concrete version (for example of the JVM), test by invoking it with &quot;-version&quot;.  </code></pre></li>
+</ul>
+<pre><code>
+function require() { for p in &quot;$@&quot; ; do which &quot;$p&quot; &gt; /dev/null || die &quot;$p is not available&quot; ; done ; }
+
+require lame nodejs</code></pre>
+</div>
+<div id="keep-them-short" class="slide section level1">
+<h1>Keep them short</h1>
+<p>If you need to perform many relatively independent tasks (such as in
+an installer)</p>
+<ul>
+<li><p>create multiple files as a kind of libraries and source
+them</p></li>
+<li><p>split them into different files and <code>run-parts</code> that
+directory.</p>
+<ul>
+<li><code>--exit-on-failure</code></li>
+<li>Pitfall: it is not trivial to pass variables from one subtask to
+another.</li>
+</ul></li>
+</ul>
+</div>
+<div id="dont-fork-unless-needed" class="slide section level1">
+<h1>Don’t fork unless needed</h1>
+<ul>
+<li>Waste of time</li>
+<li>Waste of space in the process table</li>
+<li>Problems with signalling. SIGKILL, SIGTERM</li>
+<li>Scripts that just set some variables and then run another program
+should not simply execute it (fork+exec) but just exec it (thus avoiding
+one process in the system).</li>
+<li>However: You need to fork+exec for cleaning up</li>
+</ul>
+</div>
+<div id="be-space-transparent." class="slide section level1">
+<h1>Be space-transparent.</h1>
+<ul>
+<li>Double-quote everything.
+<ul>
+<li>For example find your dependencies with
+<code>"$(dirname "$0")"</code></li>
+</ul></li>
+<li><code>find -print0 | xargs -0r</code></li>
+</ul>
+</div>
+<div id="parsing-output" class="slide section level1">
+<h1>Parsing output</h1>
+<ul>
+<li>Locale assumptions
+<ul>
+<li>Don’t assume a certain locale.</li>
+<li>If needed, force it: export LANG=C.UTF-8</li>
+</ul></li>
+</ul>
+<pre><code>## Remove files if they exist in $DIR2
+
+find -type f -print0 |
+    xargs -0r md5sum  |
+    ( cd &quot;$DIR2&quot; &amp;&amp; md5sum -c )  | 
+    sed -n &#39;s/: OK$//p&#39; | 
+    tr &#39;\n&#39; &#39;\0&#39; | 
+    xargs -0r rm -v </code></pre>
+<ul>
+<li>Don’t parse ls’s output. <em>ls</em> was meant to be human readable,
+not machine readable. <a href="http://mywiki.wooledge.org/ParsingLs"
+class="uri">http://mywiki.wooledge.org/ParsingLs</a></li>
+</ul>
+</div>
+<div id="shutdown-requests" class="slide section level1">
+<h1>Shutdown requests</h1>
+<ul>
+<li><p>Politely ask processes for termination. Programs should die
+gracefully.</p></li>
+<li><p>Do not SIGKILL things just to make sure they will die.</p></li>
+<li><p>Risks:</p>
+<ul>
+<li><pre><code>       The program can corrupt its persisted state</code></pre></li>
+<li><pre><code>   SIGKILLing programs hides their failure to properly shut down, which could bring problems later</code></pre></li>
+<li><pre><code>  Even simple programs such an IRC client will show &quot;Connection reset by peer&quot; quit message instead of &quot;Quit: Leaving&quot;.</code></pre></li>
+</ul></li>
+</ul>
+</div>
+<div id="robust-start" class="slide section level1">
+<h1>Robust start</h1>
+<ul>
+<li><p>Don’t wait forever for servers to start. Set a timeout.<br />
+</p></li>
+<li><p>Try to check as much as possible that the server has started
+(open ports …)</p></li>
+<li><p>Servers are much more robust when they perform the fork
+themselves than when we launch them in background. (Important if you are
+implementing a server yourself)</p></li>
+</ul>
+<pre><code>myservice &amp; 
+SERVICE_PID=$!
+trap &quot;kill $SERVICE_PID&quot; EXIT
+sleep 1
+if ! ps $SERVICE_PID
+then
+    die &quot;Server died too quickly&quot;
+fi</code></pre>
+</div>
+<div id="robust-start---checking-an-open-port"
+class="slide section level1">
+<h1>Robust start - checking an open port</h1>
+<pre><code>myservice &amp; 
+SERVICE_PID=$!
+trap &quot;kill $SERVICE_PID&quot; EXIT
+
+while ! nc -z  localhost 1234     ##netcat&#39;s zero-I/O
+then 
+    if ! kill -0 $SERVICE_PID 
+    then
+        die &quot;Server died prematurely&quot;
+    fi
+    echo &quot;Waiting for the server to open up the port&quot;
+    sleep 1
+done
+</code></pre>
+</div>
+<div id="robust-termination" class="slide section level1">
+<h1>Robust termination</h1>
+<ul>
+<li>Signal it once to exit gracefully then after a while SIGKILL it and
+show a warning in case it had not died in first instance: you would have
+some issue there.</li>
+<li>Always wait programs for a while for them to free up bound
+sockets.</li>
+</ul>
+<pre><code>if kill $SERVER_PID
+then    
+    sleep 1
+    if kill -KILL $SERVER_PIF   
+    then 
+        warn &quot;Server didn&#39;t die in time&quot;; sleep 1 ; 
+    fi
+else
+    warn &quot;Server was already dead&quot;
+fi  </code></pre>
+</div>
+<div id="daemonize-non-daemoniac-processes"
+class="slide section level1">
+<h1>Daemonize non-daemoniac processes</h1>
+<p>Easy way to keep your non-daemon-like processes up.</p>
+<p>daemon -r – /usr/local/bin/myservice.sh</p>
+<ul>
+<li>Respawning (limited retrials allowed)</li>
+<li>Redirections</li>
+<li>chdir</li>
+<li>Saving the PID for later termination</li>
+</ul>
+</div>
+<div id="empty-sets" class="slide section level1">
+<h1>Empty sets</h1>
+<p>Don’t assume non-empty sets:</p>
+<ul>
+<li>Don’t “for in *” (will expand to * if no files), unless <span
+class="math inline"><em>n</em><em>u</em><em>l</em><em>l</em><em>g</em><em>l</em><em>o</em><em>b</em></span>.</li>
+</ul>
+<pre><code>shopt -s nullglob</code></pre>
+<pre><code>$ echo *.avi
+*.avi
+$ shopt -s nullglob
+$ echo *.avi
+&lt;empty&gt;</code></pre>
+<ul>
+<li>Don’t xargs without -r (it is probably not worth to run your program
+with no arguments). (ls, rm, …)</li>
+</ul>
+</div>
+<div id="youre-not-alone-in-the-cpu" class="slide section level1">
+<h1>You’re not alone in the CPU</h1>
+<p>Don’t assume the amount of available cores. If at all, use
+“$(nproc)”.</p>
+<pre><code>make -j$(nproc) -l$(nproc)</code></pre>
+<pre><code>make -j$(nproc) -l$(nproc) ${MAKEFLAGS:-}   # Makeflags has priority</code></pre>
+</div>
+<div id="youre-not-alone-in-the-disk" class="slide section level1">
+<h1>You’re not alone in the disk</h1>
+<ul>
+<li>Scripts should not use global directories anchored in /tmp.<br />
+</li>
+<li>Concurrent executions (in a CI machine for example) will
+collide.</li>
+<li>If possible, a directory inside the project root (if such concept
+exists) should be used.</li>
+</ul>
+</div>
+<div id="temporaries" class="slide section level1">
+<h1>Temporaries</h1>
+<p>Create temporary files and directories wisely.</p>
+<ul>
+<li><pre><code>   Don&#39;t use a single directory with a certain name in /tmp. Risks:</code></pre>
+<ul>
+<li><pre><code>  collisions among different executions. </code></pre></li>
+<li><pre><code>  Permissions problems in multiuser. </code></pre></li>
+<li><pre><code>  Exposure to malicious attacks.</code></pre></li>
+<li><pre><code>  No direct support for alternative temporary partitions (mktemp honors \$TPMDIR)</code></pre></li>
+</ul></li>
+</ul>
+</div>
+<div id="secure-temps" class="slide section level1">
+<h1>Secure temps</h1>
+<ul>
+<li>For directories:</li>
+</ul>
+<pre><code>TMPD=$(mktemp -d) ; trap &quot;rm -rf $TMPD&quot; EXIT</code></pre>
+<ul>
+<li>For files:</li>
+</ul>
+<pre><code>TMPF=$(mktemp ) ; trap &quot;rm -f $TMPD&quot; EXIT</code></pre>
+</div>
+<div id="abusing-temporaries" class="slide section level1">
+<h1>Abusing temporaries</h1>
+<ul>
+<li><pre><code>   Don&#39;t use temporary files unless needed.  &quot;Better than cleaning is not get dirty&quot;</code></pre>
+<ul>
+<li><pre><code>  Use pipelines</code></pre></li>
+<li><pre><code>  For multiple outputs, use process replacement: source | tee &gt;(sink1) | sink2</code></pre></li>
+</ul></li>
+</ul>
+</div>
+<div id="dont-abuse-cats" class="slide section level1">
+<h1>Don’t abuse cats</h1>
+<ul>
+<li><pre><code>`cat file | program` vs `program &lt; file`:</code></pre>
+<ul>
+<li>extra needless process</li>
+<li>prevents program from memory-mapping the file</li>
+</ul></li>
+</ul>
+</div>
+<div id="nothing-is-forever" class="slide section level1">
+<h1>Nothing is forever</h1>
+<ul>
+<li><pre><code>Avoid `while true` if a real check is available:</code></pre>
+<ul>
+<li><code>while ps $SERVER1 &amp;&amp; ps $SERVER2</code></li>
+<li><code>while nc -z localhost $SERVER_PORT</code></li>
+<li><code>while wget -qO /dev/null http://localhost:8080/check</code></li>
+</ul></li>
+</ul>
+</div>
+<div id="section" class="slide section level1">
+<h1><code>-- "$@"</code></h1>
+<ul>
+<li>Make your scripts freely parametrizable with “$@” if possible.</li>
+</ul>
+<pre><code>mplayer-high-prio.sh:
+#! /bin/bash 
+
+set -eu 
+
+sudo ionice mplayer &quot;$@&quot;</code></pre>
+<ul>
+<li>Avoided risk: This will save you the risk of ad-hoc modifying the
+script and then forget.</li>
+</ul>
+</div>
+<div id="passwords" class="slide section level1">
+<h1>Passwords</h1>
+<ul>
+<li>Don’t keep passwords in your scripts.</li>
+<li>Risk: Leaking passwords when sharing or uploading scripts.</li>
+<li>Tip: Save passwords to something like <code>"$(dirname "$0")"</code>
+or ~/.myapp.conf and source it</li>
+</ul>
+</div>
+<div id="chaining" class="slide section level1">
+<h1>&amp;&amp; chaining</h1>
+<p>Chain with &amp;&amp; commands meant to be chained.</p>
+<pre><code>sudo apt-get install package
+package ...</code></pre>
+<ul>
+<li>pasting mechanism is stupid</li>
+<li>if sudo or apt-get want some input, they will get “package”, which
+was meant as an input to bash, and not to them</li>
+<li>all commands will be processed regardless of failures</li>
+</ul>
+<p>vs</p>
+<pre><code>sudo apt-get install package &amp;&amp; 
+package ...</code></pre>
+<p>Ctrl-X Ctrl-E opens an editor in bash</p>
+<pre><code>
+# Modules 
+</code></pre>
+<p>#! /bin/bash</p>
+<p>set -eu</p>
+<p>source “$(dirname”$0”)“/common_funcs.sh ```</p>
+</div>
+<div id="respect-user-preferences" class="slide section level1">
+<h1>Respect user preferences</h1>
+<ul>
+<li>xdg-open</li>
+<li><code>x-www-open</code></li>
+<li><code>$VISUAL</code></li>
+</ul>
+</div>
+<div id="binbash" class="slide section level1">
+<h1><code>#! /bin/bash</code></h1>
+<p><span
+class="math inline">/<em>b</em><em>i</em><em>n</em>/<em>s</em><em>h</em></span>
+will fail in a machine with an alternative shell by default</p>
+<p>dash is faster. Use it if possible. Remove bashisms.
+checkbashisms.</p>
+</div>
+<div id="shcov" class="slide section level1">
+<h1>shcov</h1>
+<p>Code coverage in shell!</p>
+<p>Because testing matters, right? ;)</p>
+</div>
+<div id="syntax-check-tools" class="slide section level1">
+<h1>Syntax check tools</h1>
+<ul>
+<li><p>Overall checks:</p>
+<ul>
+<li>checkshell</li>
+</ul></li>
+<li><p>Bashisms: checkbashisms</p></li>
+</ul>
+</div>
+<div id="dont-abuse-bash" class="slide section level1">
+<h1>Don’t abuse bash</h1>
+<p>… if other languages are more convenient:</p>
+<ul>
+<li><p>to handle socket connections</p></li>
+<li><p>to handle signals</p></li>
+<li><p>to do intensive string manipulation</p></li>
+<li><p>to do intensive CPU</p></li>
+<li><p>Shell script should simply glue things together.</p></li>
+<li><p>Migrate to python</p></li>
+</ul>
+</div>
+</body>
+</html>
